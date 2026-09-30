@@ -1,31 +1,164 @@
 import streamlit as st
-from dotenv import load_dotenv
-import os
-from google import genai
+from sentence_transformers import SentenceTransformer
+import chromadb
+import ollama
+import uuid
 
-load_dotenv()
-api_key=os.getenv("GEMINI_API_KEY")
-client=genai.Client(api_key=api_key)
+
 st.set_page_config(
-    page_title="Gemini AI Chatbot",
-    page_icon="🤖",
-    layout="centered"
+    page_title="Mini RAG Q&A",
+    page_icon="🤖"
 )
-st.title("Gemini AI Chatbot")
-st.write("ask gemini anything!")
 
-prompt=st.text_area(
-    "Enter your prompt:",
-    placeholder="explain artificial intelligence in simple words..."
+st.title("🤖 Mini RAG Q&A")
+st.write(
+    "Paste a document, store it in ChromaDB, and ask questions about it."
 )
-if st.button("generate response"):
-    if prompt:
-        with st.spinner("gemini is thinking.... "):
-            response=client.models.generate_content(
-                model="gemini-3.5-flash-lite",
-                contents=prompt
-            )
-        st.success("Response generated!")
-        st.write(response.text)
+
+
+@st.cache_resource
+def load_embedding_model():
+    return SentenceTransformer("all-MiniLM-L6-v2")
+
+
+embedding_model = load_embedding_model()
+
+
+@st.cache_resource
+def get_chroma_client():
+    return chromadb.Client()
+
+
+client = get_chroma_client()
+
+collection = client.get_or_create_collection(
+    name="documents"
+)
+
+
+document = st.text_area(
+    "Paste your document here",
+    height=250,
+    placeholder="Paste your notes, article, syllabus, etc."
+)
+
+
+if st.button("+ Add document"):
+    if not document.strip():
+        st.warning("Please enter some text.")
     else:
-        st.warning("please enter a prompt.")
+        chunks = [
+            document[i:i + 500]
+            for i in range(0, len(document), 500)
+        ]
+
+        embeddings = embedding_model.encode(chunks)
+
+        ids = [
+            f"chunk_{uuid.uuid4()}"
+            for _ in chunks
+        ]
+
+        collection.add(
+            ids=ids,
+            documents=chunks,
+            embeddings=embeddings.tolist()
+        )
+
+        st.success(
+            f"Added {len(chunks)} chunk(s) to ChromaDB."
+        )
+
+
+question = st.text_input(
+    "❓ Ask a question about your document"
+)
+
+
+if st.button("Ask AI"):
+    if not question.strip():
+        st.warning("Please enter a question.")
+
+    elif collection.count() == 0:
+        st.warning("Please add a document first.")
+
+    else:
+        question_embedding = embedding_model.encode(
+            [question]
+        )[0]
+
+        results = collection.query(
+            query_embeddings=[
+                question_embedding.tolist()
+            ],
+            n_results=min(
+                3,
+                collection.count()
+            )
+        )
+
+        retrieved_chunks = results["documents"][0]
+
+        context = "\n\n".join(
+            retrieved_chunks
+        )
+
+        prompt = f"""
+You are a helpful AI assistant.
+
+Answer the question ONLY using the context below.
+
+Context:
+{context}
+
+Question:
+{question}
+
+If the answer is not present in the context,
+say "I don't know based on the provided document."
+"""
+
+        try:
+            response = ollama.chat(
+                model="llama3.2",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
+            )
+
+            st.subheader("Answer")
+
+            st.write(
+                response["message"]["content"]
+            )
+
+            with st.expander(
+                "Retrieved context"
+            ):
+                for i, chunk in enumerate(
+                    retrieved_chunks
+                ):
+                    st.write(
+                        f"**Chunk {i + 1}:**"
+                    )
+                    st.write(chunk)
+
+        except Exception as e:
+            st.error(
+                "Could not connect to Ollama. "
+                "Make sure Ollama is running and "
+                "run 'ollama pull llama3.2' first."
+            )
+
+            st.code(str(e))
+
+
+st.divider()
+
+st.caption(
+    "Python + Sentence Transformers + "
+    "ChromaDB + Ollama + Streamlit"
+)
