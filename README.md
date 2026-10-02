@@ -2,7 +2,7 @@
 
 Mini RAG LLM is a simple Retrieval-Augmented Generation (RAG) application built using Python, Streamlit, Sentence Transformers, ChromaDB, and Ollama.
 
-The application allows users to paste a document, convert it into embeddings, store the data in ChromaDB, retrieve the most relevant chunks based on a question, and generate an answer using the Llama 3.2 model through Ollama.
+The application allows users to paste a text, convert it into embeddings, store the data in ChromaDB, retrieve the most relevant chunks based on a question, and generate an answer using the Llama 3.2 model through Ollama.
 
 ## Features
 
